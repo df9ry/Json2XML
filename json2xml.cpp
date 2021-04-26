@@ -12,6 +12,7 @@
 
 #include <memory>
 #include <fstream>
+#include <algorithm>
 
 using namespace std;
 using namespace jsonx;
