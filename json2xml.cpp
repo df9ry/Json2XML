@@ -13,6 +13,7 @@
 #include <memory>
 #include <fstream>
 #include <algorithm>
+#include <filesystem>
 
 using namespace std;
 using namespace jsonx;
@@ -34,11 +35,12 @@ static void to_string(SAXPrintHandlers &ph, const string &str)
     ph.characters(X(str.c_str()), str.length());
 }
 
-static void j2x(const jsonx::json &j, SAXPrintHandlers &ph, int index)
+static void j2x(const jsonx::json &j, SAXPrintHandlers &ph, int index, bool pp)
 {
     if (!j.isDefined())
         return;
-    new_line(ph, index);
+    if (pp)
+        new_line(ph, index);
     if (j.isNull()) {
         ph.startElement(X("null"), attrs);
         ph.endElement(X("null"));
@@ -77,21 +79,25 @@ static void j2x(const jsonx::json &j, SAXPrintHandlers &ph, int index)
     if (j.isArray()) {
         ph.startElement(X("array"), attrs);
         for (size_t i = 0; i < j.size(); ++i)
-            j2x(j[i], ph, index+1);
-        new_line(ph, index);
+            j2x(j[i], ph, index+1, pp);
+        if (pp)
+            new_line(ph, index);
         ph.endElement(X("array"));
         return;
     }
     ph.startElement(X("object"), attrs);
     json_object_t obj{j.toObject()};
     for_each(obj.begin(), obj.end(), [&] (const pair<const string, json> &v) {
-        new_line(ph, index+1);
+        if (pp)
+            new_line(ph, index+1);
         ph.startElement(X(v.first.c_str()), attrs);
-        j2x(v.second, ph, index+2);
-        new_line(ph, index+1);
+        j2x(v.second, ph, index+2, pp);
+        if (pp)
+            new_line(ph, index+1);
         ph.endElement(X(v.first.c_str()));
     });
-    new_line(ph, index);
+    if (pp)
+        new_line(ph, index);
     ph.endElement(X("object"));
 }
 
@@ -121,7 +127,7 @@ void Json2XML::json2xml(const jsonx::json &j, std::ostream &os)
     SAXPrintHandlers printHandlers(os, "UTF-8", unrepFlags);
     printHandlers.startDocument();
     printHandlers.startElement(X("json"), attrs);
-    j2x(j, printHandlers, 1);
+    j2x(j, printHandlers, 1, true);
     new_line(printHandlers, 0);
     printHandlers.endElement(X("json"));
     new_line(printHandlers, 0);
@@ -145,4 +151,61 @@ json Json2XML::xml2json(const string &xmlFile)
 
     parser->parse(xmlFile.c_str());
     return handler.getResult();
+}
+
+static void remove_temp(const string &file)
+{
+    try {
+        if (filesystem::exists(file))
+            filesystem::remove(file);
+    }
+    catch (...)
+    {}
+}
+
+json Json2XML::xml2json(istream &is)
+{
+    const size_t S_COPYBUF = 4096;
+    string temp_name;
+    json result;
+
+    try {
+#if _WIN32
+        {
+            errno_t err;
+            char buf[L_tmpnam_s];
+            err = tmpnam_s(buf, L_tmpnam_s);
+            if (err)
+                throw runtime_error("Unable to get tempfile name. ERC="
+                                    + to_string(err));
+            temp_name = buf;
+        }
+#else
+        temp_name = tmpnam(nullptr);
+#endif
+
+        ofstream file_stream;
+        file_stream.open(temp_name);
+        if (!file_stream.is_open()) {
+            throw runtime_error(string("Unable to open \"") + temp_name + "\"");
+        }
+        {
+            char copybuf[S_COPYBUF];
+            while (true) {
+                is.read(copybuf, S_COPYBUF);
+                streamsize n{is.gcount()};
+                file_stream.write(copybuf, n);
+                if ((is.gcount() < S_COPYBUF) || (!is.good()))
+                    break;
+            } // end while //
+        }
+        file_stream.close();
+        result = xml2json(temp_name);
+    }
+    catch (...) {
+        remove_temp(temp_name);
+        throw;
+    }
+    remove_temp(temp_name);
+    return result;
 }

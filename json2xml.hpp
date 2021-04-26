@@ -15,6 +15,7 @@ public:
     void json2xml(const jsonx::json &j, const std::string &xmlFile);
 
     jsonx::json xml2json(const std::string &xmlFile);
+    jsonx::json xml2json(std::istream &is);
 };
 
 #endif // JSON2XML_HPP
